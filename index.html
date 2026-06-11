@@ -170,6 +170,10 @@
     .dep-pending-group { border:1.5px solid #ffc107; border-radius:10px; padding:12px 16px; margin-bottom:10px; background:#fffdf0; }
     .dep-pending-group-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
     .dep-pending-group-title { font-weight:600; font-size:14px; }
+    .dep-serial-list { display:flex; flex-wrap:wrap; gap:6px 14px; }
+    .dep-serial-chk { display:inline-flex; align-items:center; gap:5px; cursor:pointer; }
+    .dep-serial-chk input { cursor:pointer; }
+    .dep-group-chk { cursor:pointer; }
     @media (prefers-color-scheme: dark) {
       .badge-pending-deploy { background:#3a2e00; color:#ffd54f; border-color:#856404; }
       .dep-pending-group { border-color:#856404; background:#1e1900; }
@@ -817,6 +821,10 @@
         <div>
           <div class="panel-title" style="margin:0;">📋 Pending Deployment</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Items staged for deployment — still in Stock Holding. Confirm to deploy and remove from stock.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <label class="dep-serial-chk" style="font-size:12px;color:var(--text-muted);"><input type="checkbox" id="dep-select-all" /> Select all</label>
+          <button class="btn btn-orange btn-sm" id="dep-confirm-selected">✓ Confirm Selected</button>
         </div>
       </div>
       <div id="dep-pending-body"></div>

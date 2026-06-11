@@ -1059,13 +1059,17 @@ const UI = (() => {
             .filter(c => c != null)
             .reduce((a, c) => a + c, 0);
           const costed = pd.serials.filter(s => DB.getSerialCost(s) != null).length;
+          const serialChecks = pd.serials.map(s =>
+            `<label class="dep-serial-chk" style="font-size:12px;color:var(--text-muted);font-family:var(--mono);"><input type="checkbox" class="dep-serial-chk-input" data-id="${pd.id}" data-serial="${esc(s)}" checked />${esc(s)}</label>`
+          ).join('');
           return `<div class="dep-pending-group">
             <div class="dep-pending-group-header">
-              <div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" class="dep-group-chk" data-id="${pd.id}" title="Select this entry for batch confirm" />
                 <span class="dep-pending-group-title">${esc(pd.customer)}</span>
-                <span class="cat-badge" style="margin-left:8px;">${esc(pd.product)}</span>
-                ${pd.location ? `<span class="loc-badge" style="margin-left:6px;">${esc(pd.location)}</span>` : ''}
-                <span class="badge-pending-deploy" style="margin-left:8px;">📋 Pending</span>
+                <span class="cat-badge">${esc(pd.product)}</span>
+                ${pd.location ? `<span class="loc-badge">${esc(pd.location)}</span>` : ''}
+                <span class="badge-pending-deploy">📋 Pending</span>
               </div>
               <div style="display:flex;gap:8px;align-items:center;">
                 <span style="font-size:12px;color:var(--text-muted);">${pd.serials.length} unit${pd.serials.length!==1?'s':''}${costed>0?` · $${totalCost.toFixed(2)}`:''}${pd.stagedAt ? ' · Staged '+fmtDate(pd.stagedAt) : ''}</span>
@@ -1073,20 +1077,86 @@ const UI = (() => {
                 <button class="btn btn-ghost btn-sm dep-unstage-btn" data-id="${pd.id}" style="color:var(--danger-text);">✕ Cancel</button>
               </div>
             </div>
-            <div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);">${pd.serials.join(' · ')}</div>
+            <div class="dep-serial-list">${serialChecks}</div>
           </div>`;
         }).join('');
 
-        // Wire confirm buttons
+        // Returns the checked serials for a given pending id
+        const checkedSerials = (id) => Array.from(
+          pendingBody.querySelectorAll(`.dep-serial-chk-input[data-id="${id}"]:checked`)
+        ).map(cb => cb.dataset.serial);
+
+        // Ids of the staged entries selected (group checkbox ticked) for batch confirm
+        const selectedGroupIds = () => Array.from(
+          pendingBody.querySelectorAll('.dep-group-chk:checked')
+        ).map(chk => chk.dataset.id);
+
+        // Update the "Confirm Selected (N)" label — N = checked serials in selected groups
+        const updateSelectedCount = () => {
+          const n = selectedGroupIds().reduce((a, id) => a + checkedSerials(id).length, 0);
+          const btn = document.getElementById('dep-confirm-selected');
+          if (btn) btn.textContent = `✓ Confirm Selected (${n})`;
+          const all = document.getElementById('dep-select-all');
+          if (all) {
+            const groups = pendingBody.querySelectorAll('.dep-group-chk').length;
+            const checked = pendingBody.querySelectorAll('.dep-group-chk:checked').length;
+            all.checked = checked > 0;
+            all.indeterminate = checked > 0 && checked < groups;
+          }
+        };
+
+        // Group checkbox selects the entry for batch confirm (independent of its serials)
+        pendingBody.querySelectorAll('.dep-group-chk').forEach(chk => {
+          chk.addEventListener('change', updateSelectedCount);
+        });
+
+        // Serial checkbox just refreshes the count
+        pendingBody.querySelectorAll('.dep-serial-chk-input').forEach(cb => {
+          cb.addEventListener('change', updateSelectedCount);
+        });
+
+        // Header "All" toggle — selects/deselects all staged entries
+        const selectAll = document.getElementById('dep-select-all');
+        if (selectAll) {
+          selectAll.onchange = () => {
+            pendingBody.querySelectorAll('.dep-group-chk').forEach(chk => { chk.checked = selectAll.checked; });
+            updateSelectedCount();
+          };
+        }
+
+        // Confirm Selected — batch confirm checked serials in the selected groups
+        const confirmSelectedBtn = document.getElementById('dep-confirm-selected');
+        if (confirmSelectedBtn) {
+          confirmSelectedBtn.onclick = () => {
+            const ids = selectedGroupIds();
+            const selections = ids
+              .map(id => ({ id: Number(id), serials: checkedSerials(id) }))
+              .filter(sel => sel.serials.length);
+            const total = selections.reduce((a, s) => a + s.serials.length, 0);
+            if (!total) { UI.showAlert('Select one or more staged entries to confirm.', 'error'); return; }
+            if (!confirm(`Confirm deployment of ${total} unit${total!==1?'s':''} across ${selections.length} group${selections.length!==1?'s':''}?
+
+This will remove them from Stock Holding and add them to Stock Deployed.`)) return;
+            try {
+              Inventory.confirmDeployments(selections);
+              UI.renderDashboard && UI.renderDashboard();
+              renderDeployed();
+            } catch(e) { UI.showAlert(e.message, 'error'); }
+          };
+        }
+
+        // Wire per-group confirm buttons (confirms that group's checked serials)
         pendingBody.querySelectorAll('.dep-confirm-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             const pd = DB.getPendingDeployments().find(p => p.id == btn.dataset.id);
             if (!pd) return;
-            if (!confirm(`Confirm deployment of ${pd.serials.length} unit${pd.serials.length!==1?'s':''} to "${pd.customer}"?
+            const serials = checkedSerials(btn.dataset.id);
+            if (!serials.length) { UI.showAlert('Select at least one item in this group to confirm.', 'error'); return; }
+            if (!confirm(`Confirm deployment of ${serials.length} unit${serials.length!==1?'s':''} to "${pd.customer}"?
 
 This will remove them from Stock Holding and add them to Stock Deployed.`)) return;
             try {
-              Inventory.confirmDeployment(Number(btn.dataset.id));
+              Inventory.confirmDeployment(Number(btn.dataset.id), serials);
               UI.renderDashboard && UI.renderDashboard();
               renderDeployed();
             } catch(e) { UI.showAlert(e.message, 'error'); }
@@ -1105,6 +1175,8 @@ Items will remain in Stock Holding with no customer attached.`)) return;
             renderDeployed();
           });
         });
+
+        updateSelectedCount();
       } else {
         pendingPanel.style.display = 'none';
       }
@@ -1615,19 +1687,25 @@ Items will remain in Stock Holding with no customer attached.`)) return;
       return;
     }
     const statusBadge = info.status==='in-stock' ? '<span class="badge b-ok">In stock</span>' : info.status==='in-transit' ? '<span class="badge b-transit">In transit</span>' : '<span class="badge b-out">Dispatched</span>';
-    const lastOut = info.history.filter(m=>m.type==='OUT').slice(-1)[0];
+    const pendingBadge = info.pendingDeployment ? '<span class="badge-pending-deploy">📋 Pending Deploy</span>' : '';
+    const condBadge = info.condition ? `<span class="badge b-condition b-cond-${info.condition}">${_conditionLabel(info.condition)}</span>` : '';
+    const usedBadge = info.used ? '<span class="badge b-used">USED</span>' : '';
+    const pd = info.pendingDeployment;
     res.innerHTML = `
       <div class="lookup-status-card">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-          <span style="font-family:var(--mono);font-size:15px;font-weight:600">${esc(info.serial)}</span>${statusBadge}
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:600">${esc(info.serial)}</span>${statusBadge}${pendingBadge}${condBadge}${usedBadge}
           ${cost != null ? `<span style="font-size:12px;color:var(--text-muted)">Cost: <strong>${costStr}</strong></span>` : ''}
         </div>
         <div class="lookup-meta">
           <div><div class="lookup-meta-label">Product</div>${esc(info.currentProduct||'—')}</div>
           <div><div class="lookup-meta-label">Location</div><span class="loc-badge">${esc(info.currentLocation||'—')}</span></div>
           <div><div class="lookup-meta-label">Category</div>${esc(info.currentCategory||'—')}</div>
+          ${info.poNumber ? `<div><div class="lookup-meta-label">PO Number</div>${esc(info.poNumber)}</div>` : ''}
         </div>
-        ${info.status==='dispatched' && lastOut ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px">Last dispatched to: <strong>${esc(lastOut.customer||'—')}</strong></div>` : ''}
+        ${pd ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px">📋 Staged for: <strong>${esc(pd.customer||'—')}</strong>${pd.by?` · by ${esc(pd.by)}`:''}${pd.ref?` · ref ${esc(pd.ref)}`:''}${pd.stagedAt?` · ${fmtDateFull(pd.stagedAt)}`:''}</div>` : ''}
+        ${info.testedBy ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px">Tested by <strong>${esc(info.testedBy)}</strong>${info.testedAt?` on ${fmtDateFull(info.testedAt)}`:''}${info.testNotes?` — ${esc(info.testNotes)}`:''}</div>` : ''}
+        ${info.status==='dispatched' ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px">${info.rmaTlType?`<span class="badge b-condition b-cond-${info.rmaTlType}">${_conditionLabel(info.rmaTlType)}</span> `:''}Dispatched to: <strong>${esc(info.deployedTo||'—')}</strong>${info.deployedBy?` · by ${esc(info.deployedBy)}`:''}${info.deployedRef?` · ref ${esc(info.deployedRef)}`:''}${info.deployedDate?` · ${fmtDateFull(info.deployedDate)}`:''}</div>` : ''}
       </div>
       ${info.history.length ? `<div class="panel" style="margin-bottom:0">
         <div class="panel-title">Movement history</div>

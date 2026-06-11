@@ -295,7 +295,47 @@ const Inventory = (() => {
         }
       });
     });
-    return { serial: s, history, status, currentProduct, currentLocation, currentCategory };
+
+    const result = { serial: s, history, status, currentProduct, currentLocation, currentCategory };
+
+    // Pending deployment — a staged serial is still physically in stock, so this
+    // coexists with the in-stock status.
+    const pd = DB.getPendingDeployments().find(p => p.serials.map(x => x.toUpperCase()).includes(s));
+    if (pd) result.pendingDeployment = { customer: pd.customer || '', by: pd.by || '', ref: pd.ref || '', stagedAt: pd.stagedAt || '' };
+
+    // In-stock detail — reuse getAllSerialRows (handles per-serial condition override,
+    // used flag, tested info, PO).
+    if (status === 'in-stock') {
+      const row = getAllSerialRows().find(r => r.serial.toUpperCase() === s && r.status === 'in-stock');
+      if (row) Object.assign(result, {
+        condition: row.condition, used: row.used,
+        testedBy: row.testedBy, testedAt: row.testedAt, testNotes: row.testNotes,
+        poNumber: row.poNumber,
+      });
+    }
+
+    // Dispatched detail — reuse the deployed / RMA-TL row builders.
+    if (status === 'dispatched') {
+      const dep = getDeployedSerialRows().find(r => r.serial.toUpperCase() === s)
+               || getRmaTlDispatchedRows().find(r => r.serial.toUpperCase() === s);
+      if (dep) {
+        Object.assign(result, {
+          deployedTo: dep.customer || '', deployedBy: dep.by || '',
+          deployedRef: dep.ref || '', deployedDate: dep.date || '',
+        });
+        if (dep.rmaTlType) result.rmaTlType = dep.rmaTlType;
+      } else {
+        // Fall back to the last OUT movement.
+        const lastOut = history.filter(m => m.type === 'OUT').slice(-1)[0];
+        if (lastOut) Object.assign(result, {
+          deployedTo: lastOut.customer || '', deployedBy: lastOut.by || '',
+          deployedRef: lastOut.ref || '', deployedDate: lastOut.date || '',
+          ...(lastOut.rmaTlType ? { rmaTlType: lastOut.rmaTlType } : {}),
+        });
+      }
+    }
+
+    return result;
   }
 
   // Group deployed serials by product name (for dashboard)
@@ -834,9 +874,15 @@ const Inventory = (() => {
     });
   }
 
-  function confirmDeployment(pendingId) {
+  function confirmDeployment(pendingId, serials) {
     const pd = DB.getPendingDeployments().find(p => p.id === pendingId);
     if (!pd) throw new Error('Pending deployment not found.');
+
+    // Confirm a subset of serials if provided, otherwise all of them
+    const toConfirm = Array.isArray(serials)
+      ? pd.serials.filter(s => serials.includes(s))
+      : pd.serials.slice();
+    if (!toConfirm.length) return;
 
     // Create the real OUT movement
     DB.addMovement({
@@ -844,12 +890,21 @@ const Inventory = (() => {
       type: 'OUT',
       product: pd.product, category: pd.category, location: pd.location,
       customer: pd.customer, by: pd.by || '', ref: pd.ref || '',
-      serials: pd.serials,
+      serials: toConfirm,
       date: new Date().toISOString(),
     });
 
-    // Remove from pending
-    DB.removePendingDeployment(pendingId);
+    // Keep any deselected serials staged; otherwise clear the pending record
+    const remaining = pd.serials.filter(s => !toConfirm.includes(s));
+    if (remaining.length) {
+      DB.updatePendingDeployment(pendingId, { serials: remaining });
+    } else {
+      DB.removePendingDeployment(pendingId);
+    }
+  }
+
+  function confirmDeployments(selections) {
+    (selections || []).forEach(sel => confirmDeployment(sel.id, sel.serials));
   }
 
   function getPendingDeploymentSerials() {
@@ -895,7 +950,7 @@ const Inventory = (() => {
   }
 
     DB.onReady(() => refreshProducts());
-    return { getInventoryMap, getStockByProduct, getDeployedByProduct, getAllSerialRows, getDeployedSerialRows, getRmaTlDispatchedRows, getTotalLossRows, getAvailableSerials, getLowStockItems, getSerialInfo, getSerialKnownProduct, stockIn, createShipment, receiveShipment, receivePartialShipment, stockOut, stockOutByProduct, stagePendingDeployment, confirmDeployment, getPendingDeploymentSerials, getLocations, getSuppliers, getProducts, getCustomers, getStats, recallToServicing, createOrder, refreshProducts, CATEGORIES, PRODUCTS };
+    return { getInventoryMap, getStockByProduct, getDeployedByProduct, getAllSerialRows, getDeployedSerialRows, getRmaTlDispatchedRows, getTotalLossRows, getAvailableSerials, getLowStockItems, getSerialInfo, getSerialKnownProduct, stockIn, createShipment, receiveShipment, receivePartialShipment, stockOut, stockOutByProduct, stagePendingDeployment, confirmDeployment, confirmDeployments, getPendingDeploymentSerials, getLocations, getSuppliers, getProducts, getCustomers, getStats, recallToServicing, createOrder, refreshProducts, CATEGORIES, PRODUCTS };
 
   function createOrder(opts) {
     const { supplier, poNumber, expectedBy, products, taxRate, taxAmount, taxRef } = opts;
