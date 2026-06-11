@@ -1790,7 +1790,8 @@ Items will remain in Stock Holding with no customer attached.`)) return;
         </div>`}
         <div class="form-group" style="margin-bottom:1.25rem;">
           <label class="form-label">${isAdd ? 'Serial number *' : 'New serial number *'}</label>
-          <input class="fi fi-mono" id="edit-serial-input" value="${isAdd ? '' : esc(oldSerial)}" placeholder="Enter ${isAdd ? '' : 'correct '}serial number" />
+          <input class="fi fi-mono" id="edit-serial-input" value="${isAdd ? '' : esc(oldSerial)}" placeholder="Enter ${isAdd ? 'or scan the ' : 'correct '}serial number" />
+          ${isAdd ? '<div class="hint">Scan or type the serial, then check it before clicking Save.</div>' : ''}
         </div>
         <div id="edit-serial-error" style="display:none;color:var(--danger-text);font-size:12px;margin-bottom:10px;"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;">
@@ -1833,7 +1834,12 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     });
 
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') document.getElementById('edit-serial-save').click();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // In add mode a scanner appends Enter after the serial — don't auto-submit
+        // so the user can verify the captured value before clicking Save.
+        if (!isAdd) document.getElementById('edit-serial-save').click();
+      }
       if (e.key === 'Escape') close();
     });
   }
