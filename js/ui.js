@@ -1473,6 +1473,7 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     const locF    = document.getElementById('inv-loc-filter').value;
     const statusF = document.getElementById('inv-status-filter').value;
     const isAdmin = typeof Auth !== 'undefined' && Auth.isAdmin();
+    const canEdit = typeof Auth !== 'undefined' && Auth.canEdit();
     // Serials staged for pending deployment (show badge in stock list)
     const _pendingDeploySerials = typeof Inventory !== 'undefined' && Inventory.getPendingDeploymentSerials
       ? Inventory.getPendingDeploymentSerials() : new Set();
@@ -1524,7 +1525,9 @@ Items will remain in Stock Holding with no customer attached.`)) return;
         return `<tr data-serial="${esc(r.serial)}">
           <td style="font-family:var(--mono);font-size:11px;font-weight:500">${
             r.serial.startsWith('NS-')
-              ? `<span style="font-family:var(--font);color:var(--text-hint);font-style:italic;font-size:11px;">No serial</span>`
+              ? (canEdit && r.status === 'in-stock'
+                  ? `<span class="add-serial-cell" data-serial="${esc(r.serial)}" data-product="${esc(r.product)}" style="font-family:var(--font);color:var(--aio-purple);font-size:11px;cursor:pointer;" title="Assign a serial number to this item">+ Add serial</span>`
+                  : `<span style="font-family:var(--font);color:var(--text-hint);font-style:italic;font-size:11px;">No serial</span>`)
               : esc(r.serial)
           }</td>
           <td style="font-weight:500">${esc(r.product)}</td>
@@ -1578,6 +1581,13 @@ Items will remain in Stock Holding with no customer attached.`)) return;
             if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
             if (e.key === 'Escape') { inp.removeEventListener('blur', save); renderStockList(); }
           });
+        });
+      });
+
+      // Add serial to a no-serial (placeholder) item
+      tbody.querySelectorAll('.add-serial-cell').forEach(cell => {
+        cell.addEventListener('click', () => {
+          _showEditSerialModal(cell.dataset.serial, cell.dataset.product, true);
         });
       });
 
@@ -1756,7 +1766,7 @@ Items will remain in Stock Holding with no customer attached.`)) return;
   function fmtDateFull(iso) { return new Date(iso).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}); }
 
   // ── Admin: edit serial modal ──────────────────────────────────────────
-  function _showEditSerialModal(oldSerial, product) {
+  function _showEditSerialModal(oldSerial, product, isAdd = false) {
     const existing = document.getElementById('edit-serial-modal');
     if (existing) existing.remove();
 
@@ -1766,20 +1776,21 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     modal.innerHTML = `
       <div class="modal-box" style="width:420px;">
         <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
-          <span>Edit serial number</span>
+          <span>${isAdd ? 'Add serial number' : 'Edit serial number'}</span>
           <button class="btn-remove-row" id="edit-serial-close">×</button>
         </div>
         <div class="form-group" style="margin-bottom:6px;">
           <label class="form-label">Product</label>
           <div style="font-size:13px;font-weight:500;color:var(--text);padding:6px 0;">${esc(product)}</div>
         </div>
+        ${isAdd ? '' : `
         <div class="form-group" style="margin-bottom:6px;">
           <label class="form-label">Current serial</label>
           <div style="font-family:var(--mono);font-size:13px;color:var(--text-muted);padding:6px 0;">${esc(oldSerial)}</div>
-        </div>
+        </div>`}
         <div class="form-group" style="margin-bottom:1.25rem;">
-          <label class="form-label">New serial number *</label>
-          <input class="fi fi-mono" id="edit-serial-input" value="${esc(oldSerial)}" placeholder="Enter correct serial number" />
+          <label class="form-label">${isAdd ? 'Serial number *' : 'New serial number *'}</label>
+          <input class="fi fi-mono" id="edit-serial-input" value="${isAdd ? '' : esc(oldSerial)}" placeholder="Enter ${isAdd ? '' : 'correct '}serial number" />
         </div>
         <div id="edit-serial-error" style="display:none;color:var(--danger-text);font-size:12px;margin-bottom:10px;"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;">
@@ -1818,7 +1829,7 @@ Items will remain in Stock Holding with no customer attached.`)) return;
       DB.renameSerial(oldSerial, newSerial);
       close();
       renderStockList();
-      showAlert(`Serial updated: ${oldSerial} → ${newSerial}`, 'success');
+      showAlert(isAdd ? `Serial added: ${newSerial}` : `Serial updated: ${oldSerial} → ${newSerial}`, 'success');
     });
 
     input.addEventListener('keydown', e => {
