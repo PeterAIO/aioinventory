@@ -157,7 +157,7 @@ const AuthUI = (() => {
     overlay.className = 'modal-overlay';
     overlay.id = 'users-panel-overlay';
     overlay.innerHTML = `
-      <div class="modal-box" style="width:580px;max-height:80vh;overflow-y:auto;">
+      <div class="modal-box" style="width:700px;max-height:80vh;overflow-y:auto;">
         <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;">
           <span>Manage users</span>
           <button class="btn-remove-row" id="close-users-panel">×</button>
@@ -312,19 +312,20 @@ const AuthUI = (() => {
       const roleColour = { admin: 'var(--aio-purple)', edit: 'var(--success-text)', view: 'var(--text-hint)' };
 
       const th = (t) => `<th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;color:var(--text-hint);text-transform:uppercase;border-bottom:1px solid var(--border);">${t}</th>`;
+      const cols = `<colgroup><col style="width:130px;"><col style="width:220px;"><col style="width:110px;"><col></colgroup>`;
 
       const activeRows = active.map(u => `<tr>
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);font-weight:500;">${esc(u.name || '—')}</td>
-        <td style="padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:12px;">${esc(u.email)}</td>
+        <td style="padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:12px;overflow-wrap:anywhere;">${esc(u.email)}</td>
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);">
           ${u.id === currentUid
             ? `<span style="font-size:11px;color:${roleColour[u.role]};font-weight:600;">${roleLabel[u.role] || u.role} (you)</span>`
-            : `<select class="fi" data-uid="${esc(u.id)}" style="width:110px;padding:4px 6px;font-size:12px;">
+            : `<select class="fi" data-uid="${esc(u.id)}" style="width:100%;padding:4px 6px;font-size:12px;box-sizing:border-box;">
                 ${['view','edit','admin'].map(r => `<option value="${r}"${u.role===r?' selected':''}>${roleLabel[r]}</option>`).join('')}
               </select>`}
         </td>
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);text-align:right;">
-          <div style="display:flex;gap:6px;justify-content:flex-end;">
+          <div style="display:flex;gap:6px;justify-content:flex-end;white-space:nowrap;">
             <button class="btn btn-ghost btn-xs" data-reset-pass="${esc(u.email)}" style="font-size:11px;">Reset password</button>
             ${u.id !== currentUid
               ? `<button class="btn btn-ghost btn-xs" data-delete="${esc(u.id)}" data-name="${esc(u.name||u.email)}" style="color:var(--danger-text);border-color:var(--danger-border);">Remove</button>`
@@ -335,9 +336,9 @@ const AuthUI = (() => {
 
       const removedRows = removed.length ? removed.map(u => `<tr style="opacity:.65;">
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);font-weight:500;">${esc(u.name || '—')}</td>
-        <td style="padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:12px;">${esc(u.email)}</td>
+        <td style="padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:12px;overflow-wrap:anywhere;">${esc(u.email)}</td>
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-hint);">Removed</td>
-        <td style="padding:9px 8px;border-bottom:1px solid var(--border);text-align:right;display:flex;gap:6px;justify-content:flex-end;">
+        <td style="padding:9px 8px;border-bottom:1px solid var(--border);text-align:right;display:flex;gap:6px;justify-content:flex-end;white-space:nowrap;">
           <button class="btn btn-ghost btn-xs" data-reactivate="${esc(u.id)}" data-email="${esc(u.email)}" data-name="${esc(u.name||u.email)}">Reactivate</button>
           <button class="btn btn-ghost btn-xs" data-reset-pass="${esc(u.email)}" style="font-size:11px;">Reset password</button>
         </td>
@@ -348,27 +349,30 @@ const AuthUI = (() => {
       const pendingList = Object.entries(pendingUsersMap).map(([email, p]) => ({ email, ...p }));
       const pendingRows = pendingList.map(p => `<tr>
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);font-weight:500;">${esc(p.name || '—')}</td>
-        <td style="padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:12px;">${esc(p.email)}</td>
+        <td style="padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:12px;overflow-wrap:anywhere;">${esc(p.email)}</td>
         <td style="padding:9px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-muted);">${p.role || 'edit'} · awaiting login</td>
-        <td style="padding:9px 8px;border-bottom:1px solid var(--border);text-align:right;display:flex;gap:6px;justify-content:flex-end;">
+        <td style="padding:9px 8px;border-bottom:1px solid var(--border);text-align:right;display:flex;gap:6px;justify-content:flex-end;white-space:nowrap;">
           <button class="btn btn-ghost btn-xs" data-reset-pass="${esc(p.email)}" style="font-size:11px;">Send reset email</button>
           <button class="btn btn-ghost btn-xs" data-remove-pending="${esc(p.email)}" style="color:var(--danger-text);border-color:var(--danger-border);font-size:11px;">Remove</button>
         </td>
       </tr>`).join('');
 
       container.innerHTML = `
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
+          ${cols}
           <thead><tr>${th('Name')}${th('Email')}${th('Role')}<th style="border-bottom:1px solid var(--border);"></th></tr></thead>
           <tbody>${activeRows}</tbody>
         </table>
         ${pendingList.length ? `
           <div style="margin-top:14px;margin-bottom:6px;font-size:10px;font-weight:700;color:var(--aio-orange-dark, #c05000);text-transform:uppercase;letter-spacing:.06em;">Pending — awaiting first login</div>
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
+            ${cols}
             <tbody>${pendingRows}</tbody>
           </table>` : ''}
         ${removed.length ? `
           <div style="margin-top:14px;margin-bottom:6px;font-size:10px;font-weight:700;color:var(--text-hint);text-transform:uppercase;letter-spacing:.06em;">Removed users</div>
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
+            ${cols}
             <tbody>${removedRows}</tbody>
           </table>` : ''}`;
 

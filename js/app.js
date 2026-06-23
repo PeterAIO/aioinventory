@@ -1480,11 +1480,14 @@
   bind('btn-submit-out',        'click', submitStockOut);
   bind('btn-export-inv',        'click', UI.exportInventoryCSV);
   bind('btn-export-deployed',   'click', UI.exportDeployedCSV);
+  bind('btn-export-deployed-xlsx', 'click', UI.exportDeployedXLSX);
   bind('btn-export-hist',       'click', UI.exportHistoryCSV);
 
   bind('btn-rpt-run',      'click', Reports.render);
   bind('btn-rpt-export',   'click', Reports.exportAll);
 
+  bind('dep-pending-toggle',  'click', UI.togglePendingCollapse);
+  bind('dep-pending-chevron', 'click', UI.togglePendingCollapse);
   bind('dep-search',         'input',  () => UI.renderDeployed());
   bind('dep-cat-filter',     'change', () => UI.renderDeployed());
   bind('dep-customer-filter','change', () => UI.renderDeployed());

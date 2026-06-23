@@ -211,6 +211,7 @@ const Inventory = (() => {
           serial,
           product:    mv.product,
           category:   mv.category || '',
+          location:   mv.location || '',
           customer:   mv.customer || '',
           by:         mv.by || '',
           ref:        mv.ref || '',

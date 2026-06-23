@@ -1053,6 +1053,12 @@ const UI = (() => {
     if (pendingPanel && pendingBody) {
       if (pendingList.length) {
         pendingPanel.style.display = '';
+        const countEl = document.getElementById('dep-pending-count');
+        if (countEl) {
+          const n = pendingList.reduce((a, p) => a + p.serials.length, 0);
+          countEl.textContent = `(${n} unit${n!==1?'s':''})`;
+        }
+        applyPendingCollapse();
         pendingBody.innerHTML = pendingList.map(pd => {
           const totalCost = pd.serials
             .map(s => DB.getSerialCost(s))
@@ -1236,12 +1242,43 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     }
   }
 
+  const PENDING_COLLAPSE_KEY = 'aio_dep_pending_collapsed';
+  function applyPendingCollapse() {
+    const collapsed = localStorage.getItem(PENDING_COLLAPSE_KEY) === '1';
+    const body     = document.getElementById('dep-pending-body');
+    const controls = document.getElementById('dep-pending-controls');
+    const chevron  = document.getElementById('dep-pending-chevron');
+    if (body)     body.style.display     = collapsed ? 'none' : '';
+    if (controls) controls.style.display = collapsed ? 'none' : '';
+    if (chevron)  chevron.textContent    = collapsed ? '▸' : '▾';
+  }
+  function togglePendingCollapse() {
+    const collapsed = localStorage.getItem(PENDING_COLLAPSE_KEY) === '1';
+    localStorage.setItem(PENDING_COLLAPSE_KEY, collapsed ? '0' : '1');
+    applyPendingCollapse();
+  }
+
   function exportDeployedCSV() {
     const rows = [['Serial Number','Product','Category','Customer / Account','Dispatched By','Date Deployed','Reference','Cost']];
     Inventory.getDeployedSerialRows().forEach(r => {
-      rows.push([r.serial, r.product, r.category, r.customer, r.by, fmtDateFull(r.date), r.ref, r.cost != null ? r.cost : '']);
+      rows.push([r.serial, r.product, r.category, r.customer, r.by, fmtDateTimeISO(r.date), r.ref, r.cost != null ? r.cost : '']);
     });
     _dlCSV(rows, 'aio_stock_deployed.csv');
+  }
+
+  function exportDeployedXLSX() {
+    const header = ['Serial Number','Terminal Device Name','Location','Value','Date Deployed'];
+    const data = Inventory.getDeployedSerialRows().map(r => [
+      r.serial,
+      r.product,
+      r.location || '',
+      r.cost != null ? r.cost : '',
+      fmtDateTimeISO(r.date),
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Deployed Terminals');
+    XLSX.writeFile(wb, 'aio_deployed_terminals.xlsx');
   }
 
   // ── Shipment History ─────────────────────────────────────────────────
@@ -1667,10 +1704,11 @@ Items will remain in Stock Holding with no customer attached.`)) return;
 
     const tbody = document.getElementById('hist-body');
     if (!rows.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No movements found</div></td></tr>'; return; }
-    tbody.innerHTML = rows.map(m => {
+    tbody.innerHTML = rows.map((m, i) => {
       const party   = m.type==='IN' ? (m.supplier||'—') : (m.customer||'—');
       const preview = m.serials.slice(0,3).join(', ') + (m.serials.length>3 ? ` +${m.serials.length-3}` : '');
       const actor = m.type==='IN' ? (m.receivedBy||'—') : (m.by||'—');
+      const dl = m.serials.length ? `<button class="btn btn-ghost btn-sm batch-dl" data-idx="${i}" title="Download all ${m.serials.length} serial number${m.serials.length!==1?'s':''} as CSV" style="margin-left:8px;white-space:nowrap;">⬇ CSV</button>` : '';
       return `<tr title="${esc(m.serials.join(', '))}">
         <td style="color:var(--text-hint)">${fmtDateFull(m.date)}</td>
         <td><span class="badge ${m.type==='IN'?'b-in':'b-out'}">${m.type}</span></td>
@@ -1680,9 +1718,20 @@ Items will remain in Stock Holding with no customer attached.`)) return;
         <td>${m.serials.length}</td>
         <td>${esc(party)}</td>
         <td style="font-size:12px;color:var(--text-muted)">${esc(actor)}</td>
-        <td class="serial-mono">${esc(preview)}</td>
+        <td class="serial-mono"><span>${esc(preview)}</span>${dl}</td>
       </tr>`;
     }).join('');
+
+    tbody.querySelectorAll('button.batch-dl').forEach(btn => {
+      btn.addEventListener('click', () => downloadBatchSerials(rows[parseInt(btn.dataset.idx, 10)]));
+    });
+  }
+
+  function downloadBatchSerials(m) {
+    if (!m || !m.serials.length) return;
+    const csvRows = [['Serial Number'], ...m.serials.map(s => [s])];
+    const safe = (m.product || 'batch').replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
+    _dlCSV(csvRows, `serials_${safe}_${(m.date || '').slice(0,10)}.csv`);
   }
 
   // ── Serial Lookup ─────────────────────────────────────────────────────
@@ -1764,6 +1813,7 @@ Items will remain in Stock Holding with no customer attached.`)) return;
   function esc(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function fmtDate(iso)     { return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
   function fmtDateFull(iso) { return new Date(iso).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}); }
+  function fmtDateTimeISO(iso) { const d=new Date(iso), p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
 
   // ── Admin: edit serial modal ──────────────────────────────────────────
   function _showEditSerialModal(oldSerial, product, isAdd = false) {
@@ -2542,6 +2592,6 @@ Items will remain in Stock Holding with no customer attached.`)) return;
   }
 
 
-    return { showAlert, hideAlert, renderDashboard, renderProductList, renderSupplierList, renderOrderList, renderTransitList, renderShipmentHistory, renderStockBreakdown, renderStockList, populateStockListFilters, populateCategoryFilters, renderDeployed, populateDeployedFilters, exportDeployedCSV, renderHistory, renderLookup, renderServicing, renderRMA, renderTotalLoss, renderRmaTlDispatched, populateDataLists, exportInventoryCSV, exportHistoryCSV, initSmartSelects, refreshSmartSelects };
+    return { showAlert, hideAlert, renderDashboard, renderProductList, renderSupplierList, renderOrderList, renderTransitList, renderShipmentHistory, renderStockBreakdown, renderStockList, populateStockListFilters, populateCategoryFilters, renderDeployed, populateDeployedFilters, togglePendingCollapse, exportDeployedCSV, exportDeployedXLSX, renderHistory, renderLookup, renderServicing, renderRMA, renderTotalLoss, renderRmaTlDispatched, populateDataLists, exportInventoryCSV, exportHistoryCSV, initSmartSelects, refreshSmartSelects };
 })();
 
