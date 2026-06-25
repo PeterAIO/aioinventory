@@ -20,12 +20,12 @@ const Auth = (() => {
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
 
     const FB_CONFIG = {
-      apiKey:            "AIzaSyCJaWCjiBSYEATT7ytZoK23Dauqgek1M-g",
-      authDomain:        "aio-inventory.firebaseapp.com",
-      projectId:         "aio-inventory",
-      storageBucket:     "aio-inventory.firebasestorage.app",
-      messagingSenderId: "168216293932",
-      appId:             "1:168216293932:web:68438c3e40e46ffd2f9789"
+      apiKey:            "AIzaSyCwlZg9YaGfQDKuVBDI4RAkEzKcDg7Cgdo",
+      authDomain:        "aio-inventory-b9b29.firebaseapp.com",
+      projectId:         "aio-inventory-b9b29",
+      storageBucket:     "aio-inventory-b9b29.firebasestorage.app",
+      messagingSenderId: "146229036238",
+      appId:             "1:146229036238:web:c91467e73e3e2912683c9f"
     };
 
     const app = getApps().length ? getApps()[0] : initializeApp(FB_CONFIG);
@@ -127,12 +127,12 @@ const UserManager = (() => {
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
 
     const FB_CONFIG = {
-      apiKey:            "AIzaSyCJaWCjiBSYEATT7ytZoK23Dauqgek1M-g",
-      authDomain:        "aio-inventory.firebaseapp.com",
-      projectId:         "aio-inventory",
-      storageBucket:     "aio-inventory.firebasestorage.app",
-      messagingSenderId: "168216293932",
-      appId:             "1:168216293932:web:68438c3e40e46ffd2f9789"
+      apiKey:            "AIzaSyCwlZg9YaGfQDKuVBDI4RAkEzKcDg7Cgdo",
+      authDomain:        "aio-inventory-b9b29.firebaseapp.com",
+      projectId:         "aio-inventory-b9b29",
+      storageBucket:     "aio-inventory-b9b29.firebasestorage.app",
+      messagingSenderId: "146229036238",
+      appId:             "1:146229036238:web:c91467e73e3e2912683c9f"
     };
 
     // Use a secondary app instance so the admin session is never touched

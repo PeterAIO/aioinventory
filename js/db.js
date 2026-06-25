@@ -2,12 +2,12 @@
  * db.js — AIO Inventory · Firebase Firestore backend
  */
 const DB_CONFIG = {
-  apiKey:            "AIzaSyCJaWCjiBSYEATT7ytZoK23Dauqgek1M-g",
-  authDomain:        "aio-inventory.firebaseapp.com",
-  projectId:         "aio-inventory",
-  storageBucket:     "aio-inventory.firebasestorage.app",
-  messagingSenderId: "168216293932",
-  appId:             "1:168216293932:web:68438c3e40e46ffd2f9789"
+  apiKey:            "AIzaSyCwlZg9YaGfQDKuVBDI4RAkEzKcDg7Cgdo",
+  authDomain:        "aio-inventory-b9b29.firebaseapp.com",
+  projectId:         "aio-inventory-b9b29",
+  storageBucket:     "aio-inventory-b9b29.firebasestorage.app",
+  messagingSenderId: "146229036238",
+  appId:             "1:146229036238:web:c91467e73e3e2912683c9f"
 };
 
 const DB = (() => {

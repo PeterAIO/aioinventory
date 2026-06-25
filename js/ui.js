@@ -1188,6 +1188,17 @@ Items will remain in Stock Holding with no customer attached.`)) return;
       }
     }
 
+    // ── Tab switching (By Unit / By Restaurant) ─────────────────────
+    const tab = localStorage.getItem(DEPLOYED_TAB_KEY) === 'restaurant' ? 'restaurant' : 'unit';
+    const unitView = document.getElementById('dep-unit-view');
+    const restView = document.getElementById('dep-restaurant-view');
+    const detView  = document.getElementById('dep-detail-view');
+    if (detView)  detView.style.display  = 'none';
+    if (unitView) unitView.style.display = tab === 'unit'       ? '' : 'none';
+    if (restView) restView.style.display = tab === 'restaurant' ? '' : 'none';
+    styleDeployedTabs(tab);
+    if (tab === 'restaurant') { renderRestaurantBuckets(); return; }
+
     let rows = Inventory.getDeployedSerialRows().filter(r => {
       const ms = !search  || r.serial.toLowerCase().includes(search) || r.product.toLowerCase().includes(search) || r.customer.toLowerCase().includes(search);
       const mc = !catF    || r.category === catF;
@@ -1258,6 +1269,153 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     applyPendingCollapse();
   }
 
+  // ── Deployed: By Unit / By Restaurant tabs ───────────────────────────
+  const DEPLOYED_TAB_KEY = 'aio_dep_tab';
+  function _money(n) { return '$' + (n || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function _pct(val, avg) {
+    if (!avg) return '';
+    const d = Math.round((val - avg) / avg * 100);
+    const color = d > 0 ? 'var(--success-text, #2e7d32)' : (d < 0 ? 'var(--danger-text)' : 'var(--text-muted)');
+    const sign = d > 0 ? '+' : '';
+    return `<span style="color:${color};font-weight:600;">${sign}${d}%</span> vs avg`;
+  }
+  function styleDeployedTabs(tab) {
+    const u = document.getElementById('dep-tab-unit');
+    const r = document.getElementById('dep-tab-restaurant');
+    if (u) u.className = 'btn btn-sm ' + (tab === 'unit'       ? 'btn-orange' : 'btn-ghost');
+    if (r) r.className = 'btn btn-sm ' + (tab === 'restaurant' ? 'btn-orange' : 'btn-ghost');
+  }
+  function setDeployedTab(tab) {
+    localStorage.setItem(DEPLOYED_TAB_KEY, tab === 'restaurant' ? 'restaurant' : 'unit');
+    renderDeployed();
+  }
+
+  function renderRestaurantBuckets() {
+    const buckets = Inventory.getDeployedByCustomer();
+    const n = buckets.length;
+    const totalUnits = buckets.reduce((a, b) => a + b.units, 0);
+    const totalValue = buckets.reduce((a, b) => a + b.value, 0);
+    const avgUnits = n ? totalUnits / n : 0;
+    const avgValue = n ? totalValue / n : 0;
+
+    const avgEl = document.getElementById('dep-bucket-avg');
+    if (avgEl) {
+      avgEl.textContent = n
+        ? `${n} restaurant${n!==1?'s':''} · ${totalUnits} unit${totalUnits!==1?'s':''} deployed · avg ${avgUnits.toFixed(1)} units · avg ${_money(avgValue)} each`
+        : '';
+    }
+
+    const search = (document.getElementById('dep-bucket-search')?.value || '').toLowerCase();
+    const filtered = buckets.filter(b => !search || b.customer.toLowerCase().includes(search));
+
+    const grid = document.getElementById('dep-buckets');
+    if (!filtered.length) {
+      grid.innerHTML = '<div class="empty">No deployed stock found</div>';
+      return;
+    }
+    grid.innerHTML = filtered.map(b => {
+      const topProducts = Object.entries(b.products).sort((a, c) => c[1] - a[1]).slice(0, 3)
+        .map(([p, c]) => `<span class="cat-badge">${esc(p)} ×${c}</span>`).join(' ');
+      return `<div class="dep-bucket-card" data-customer="${esc(b.customer)}" style="border:1px solid var(--border);border-radius:8px;padding:14px;cursor:pointer;background:var(--bg-2);">
+        <div style="font-weight:600;font-size:14px;margin-bottom:6px;">${esc(b.customer)}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">${b.units} unit${b.units!==1?'s':''} · ${_money(b.value)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">${topProducts}</div>
+      </div>`;
+    }).join('');
+
+    grid.querySelectorAll('.dep-bucket-card').forEach(card => {
+      card.addEventListener('click', () => openRestaurantDetail(card.dataset.customer));
+    });
+  }
+
+  function openRestaurantDetail(customer) {
+    const d = Inventory.getCustomerDetail(customer);
+    const buckets = Inventory.getDeployedByCustomer();
+    const n = buckets.length;
+    const avgUnits = n ? buckets.reduce((a, b) => a + b.units, 0) / n : 0;
+    const avgValue = n ? buckets.reduce((a, b) => a + b.value, 0) / n : 0;
+
+    const restView = document.getElementById('dep-restaurant-view');
+    const detView  = document.getElementById('dep-detail-view');
+    if (restView) restView.style.display = 'none';
+    if (detView)  detView.style.display  = '';
+
+    const costCell = c => c != null
+      ? '$' + c.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
+      : '<span style="color:var(--text-hint)">—</span>';
+
+    const currentRows = d.current.length
+      ? d.current.map(r => `<tr>
+          <td style="font-family:var(--mono);font-size:11px;font-weight:500">${esc(r.serial)}</td>
+          <td style="font-weight:500">${esc(r.product)}</td>
+          <td style="font-size:11px;color:var(--text-hint)">${fmtDateFull(r.date)}</td>
+          <td style="font-size:12px">${costCell(r.cost)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="4"><div class="empty">No hardware currently on site</div></td></tr>';
+
+    const pastRows = d.past.length
+      ? d.past.map(r => `<tr>
+          <td style="font-family:var(--mono);font-size:11px;font-weight:500">${esc(r.serial)}</td>
+          <td style="font-weight:500">${esc(r.product)}</td>
+          <td style="font-size:11px;color:var(--text-hint)">${fmtDateFull(r.date)}</td>
+          <td style="font-size:11px;color:var(--text-muted)">${esc(r.status)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="4"><div class="empty">No previous hardware on record</div></td></tr>';
+
+    const timelineRows = d.timeline.length
+      ? d.timeline.map(t => `<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--border);">
+          <span style="font-size:11px;color:var(--text-hint);min-width:120px;">${fmtDateFull(t.date)}</span>
+          <span style="font-weight:500;">${esc(t.product)}</span>
+          <span class="cat-badge">${t.count} unit${t.count!==1?'s':''}</span>
+          <span style="font-size:11px;color:var(--text-muted);">${esc(t.by || '—')}${t.ref ? ' · '+esc(t.ref) : ''}</span>
+        </div>`).join('')
+      : '<div class="empty">No deployment history</div>';
+
+    document.getElementById('dep-detail-body').innerHTML = `
+      <div style="margin-bottom:18px;">
+        <div style="font-size:20px;font-weight:700;margin-bottom:10px;">${esc(d.customer)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:24px;">
+          <div>
+            <div style="font-size:24px;font-weight:700;">${d.units}</div>
+            <div style="font-size:12px;color:var(--text-muted);">unit${d.units!==1?'s':''} on site · ${_pct(d.units, avgUnits)} (${avgUnits.toFixed(1)})</div>
+          </div>
+          <div>
+            <div style="font-size:24px;font-weight:700;">${_money(d.value)}</div>
+            <div style="font-size:12px;color:var(--text-muted);">total value · ${_pct(d.value, avgValue)} (${_money(avgValue)})</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-title" style="margin-top:8px;">Current hardware on site</div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th style="width:28%">Serial number</th><th style="width:40%">Product</th>
+          <th style="width:20%">Date deployed</th><th style="width:12%">Cost</th>
+        </tr></thead>
+        <tbody>${currentRows}</tbody>
+      </table></div>
+
+      <div class="panel-title" style="margin-top:18px;">Previous hardware (no longer here)</div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th style="width:28%">Serial number</th><th style="width:32%">Product</th>
+          <th style="width:20%">Last deployed here</th><th style="width:20%">Status</th>
+        </tr></thead>
+        <tbody>${pastRows}</tbody>
+      </table></div>
+
+      <div class="panel-title" style="margin-top:18px;">Deployment history</div>
+      <div>${timelineRows}</div>
+    `;
+  }
+
+  function closeRestaurantDetail() {
+    const restView = document.getElementById('dep-restaurant-view');
+    const detView  = document.getElementById('dep-detail-view');
+    if (detView)  detView.style.display  = 'none';
+    if (restView) restView.style.display = '';
+  }
+
   function exportDeployedCSV() {
     const rows = [['Serial Number','Product','Category','Customer / Account','Dispatched By','Date Deployed','Reference','Cost']];
     Inventory.getDeployedSerialRows().forEach(r => {
@@ -1267,10 +1425,11 @@ Items will remain in Stock Holding with no customer attached.`)) return;
   }
 
   function exportDeployedXLSX() {
-    const header = ['Serial Number','Terminal Device Name','Location','Value','Date Deployed'];
+    const header = ['Serial Number','Terminal Device Name','Customer / Account','Location','Value','Date Deployed'];
     const data = Inventory.getDeployedSerialRows().map(r => [
       r.serial,
       r.product,
+      r.customer || '',
       r.location || '',
       r.cost != null ? r.cost : '',
       fmtDateTimeISO(r.date),
@@ -1807,6 +1966,17 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
     a.download = name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  function downloadBackup() {
+    const json = DB.exportJSON();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = 'aio_inventory_backup_' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
@@ -2592,6 +2762,6 @@ Items will remain in Stock Holding with no customer attached.`)) return;
   }
 
 
-    return { showAlert, hideAlert, renderDashboard, renderProductList, renderSupplierList, renderOrderList, renderTransitList, renderShipmentHistory, renderStockBreakdown, renderStockList, populateStockListFilters, populateCategoryFilters, renderDeployed, populateDeployedFilters, togglePendingCollapse, exportDeployedCSV, exportDeployedXLSX, renderHistory, renderLookup, renderServicing, renderRMA, renderTotalLoss, renderRmaTlDispatched, populateDataLists, exportInventoryCSV, exportHistoryCSV, initSmartSelects, refreshSmartSelects };
+    return { showAlert, hideAlert, renderDashboard, renderProductList, renderSupplierList, renderOrderList, renderTransitList, renderShipmentHistory, renderStockBreakdown, renderStockList, populateStockListFilters, populateCategoryFilters, renderDeployed, populateDeployedFilters, togglePendingCollapse, setDeployedTab, closeRestaurantDetail, exportDeployedCSV, exportDeployedXLSX, renderHistory, renderLookup, renderServicing, renderRMA, renderTotalLoss, renderRmaTlDispatched, populateDataLists, exportInventoryCSV, exportHistoryCSV, downloadBackup, initSmartSelects, refreshSmartSelects };
 })();
 

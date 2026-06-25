@@ -356,6 +356,57 @@ const Inventory = (() => {
     }));
   }
 
+  // Buckets for the "By Restaurant" tab: one entry per customer
+  function getDeployedByCustomer() {
+    const map = {};
+    getDeployedSerialRows().forEach(r => {
+      const key = r.customer || '(no customer)';
+      if (!map[key]) map[key] = { customer: key, units: 0, value: 0, products: {} };
+      map[key].units++;
+      if (r.cost != null) map[key].value += r.cost;
+      map[key].products[r.product] = (map[key].products[r.product] || 0) + 1;
+    });
+    return Object.values(map).sort((a, b) => b.units - a.units);
+  }
+
+  // Detail for one restaurant: current hardware, old hardware, deployment timeline
+  function getCustomerDetail(customer) {
+    const current = getDeployedSerialRows().filter(r => (r.customer || '(no customer)') === customer);
+    const currentSet = new Set(current.map(r => r.serial));
+
+    // Where every serial is NOW (for classifying old hardware)
+    const deployedNow = {};                 // serial -> customer it's deployed to now
+    getDeployedSerialRows().forEach(r => { deployedNow[r.serial] = r.customer || '(no customer)'; });
+    const inStock = getAvailableSerials();
+
+    // Every non-RMA OUT movement to this customer = deployment history + "ever here" set
+    const { movements } = DB.getData();
+    const timeline = [];
+    const everHere = {};                    // serial -> the OUT movement that put it here
+    movements.forEach(mv => {
+      if (mv.type === 'OUT' && !mv.isRmaTl && (mv.customer || '(no customer)') === customer) {
+        timeline.push({ date: mv.date, product: mv.product, count: mv.serials.length, by: mv.by || '', ref: mv.ref || '', serials: mv.serials });
+        mv.serials.forEach(s => { everHere[s] = mv; });
+      }
+    });
+    timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Old = was deployed here, not in the current set now
+    const past = Object.entries(everHere)
+      .filter(([s]) => !currentSet.has(s))
+      .map(([s, mv]) => {
+        let status;
+        if (inStock.has(s))               status = 'Returned to stock';
+        else if (deployedNow[s])          status = 'Now at ' + deployedNow[s];
+        else                              status = 'Retired / written off';
+        return { serial: s, product: mv.product, date: mv.date, status };
+      })
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const value = current.reduce((a, r) => a + (r.cost != null ? r.cost : 0), 0);
+    return { customer, current, past, timeline, units: current.length, value };
+  }
+
   // ── Stock In ─────────────────────────────────────────────────────────
   function stockIn(receipt) {
     const { supplier, location, receivedBy, products } = receipt;
@@ -951,7 +1002,7 @@ const Inventory = (() => {
   }
 
     DB.onReady(() => refreshProducts());
-    return { getInventoryMap, getStockByProduct, getDeployedByProduct, getAllSerialRows, getDeployedSerialRows, getRmaTlDispatchedRows, getTotalLossRows, getAvailableSerials, getLowStockItems, getSerialInfo, getSerialKnownProduct, stockIn, createShipment, receiveShipment, receivePartialShipment, stockOut, stockOutByProduct, stagePendingDeployment, confirmDeployment, confirmDeployments, getPendingDeploymentSerials, getLocations, getSuppliers, getProducts, getCustomers, getStats, recallToServicing, createOrder, refreshProducts, CATEGORIES, PRODUCTS };
+    return { getInventoryMap, getStockByProduct, getDeployedByProduct, getDeployedByCustomer, getCustomerDetail, getAllSerialRows, getDeployedSerialRows, getRmaTlDispatchedRows, getTotalLossRows, getAvailableSerials, getLowStockItems, getSerialInfo, getSerialKnownProduct, stockIn, createShipment, receiveShipment, receivePartialShipment, stockOut, stockOutByProduct, stagePendingDeployment, confirmDeployment, confirmDeployments, getPendingDeploymentSerials, getLocations, getSuppliers, getProducts, getCustomers, getStats, recallToServicing, createOrder, refreshProducts, CATEGORIES, PRODUCTS };
 
   function createOrder(opts) {
     const { supplier, poNumber, expectedBy, products, taxRate, taxAmount, taxRef } = opts;

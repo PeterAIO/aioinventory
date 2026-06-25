@@ -1485,12 +1485,17 @@
 
   bind('btn-rpt-run',      'click', Reports.render);
   bind('btn-rpt-export',   'click', Reports.exportAll);
+  bind('btn-rpt-backup',   'click', UI.downloadBackup);
 
   bind('dep-pending-toggle',  'click', UI.togglePendingCollapse);
   bind('dep-pending-chevron', 'click', UI.togglePendingCollapse);
   bind('dep-search',         'input',  () => UI.renderDeployed());
   bind('dep-cat-filter',     'change', () => UI.renderDeployed());
   bind('dep-customer-filter','change', () => UI.renderDeployed());
+  bind('dep-tab-unit',       'click',  () => UI.setDeployedTab('unit'));
+  bind('dep-tab-restaurant', 'click',  () => UI.setDeployedTab('restaurant'));
+  bind('dep-detail-back',    'click',  UI.closeRestaurantDetail);
+  bind('dep-bucket-search',  'input',  () => UI.renderDeployed());
   bind('btn-lookup',            'click', () => UI.renderLookup(document.getElementById('lookup-input').value));
 
   bind('inv-search',       'input',  () => UI.renderStockList());
