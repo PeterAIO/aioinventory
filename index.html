@@ -450,6 +450,12 @@
         <label class="form-label" for="prod-notes">Notes</label>
         <textarea class="fi" id="prod-notes" rows="2" placeholder="Any notes about this product..." style="resize:vertical;font-family:inherit;"></textarea>
       </div>
+      <div class="form-group" style="margin-top:8px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="prod-serial-editable" />
+          Allow editing serial numbers in Stock Holding
+        </label>
+      </div>
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
         <button class="btn btn-orange" id="btn-submit-product">Save product</button>
         <button class="btn btn-ghost btn-sm" id="btn-cancel-product-edit" style="display:none;">Cancel edit</button>

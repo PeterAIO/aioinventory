@@ -46,7 +46,8 @@ const HARDCODED_PRODUCTS = [
   { name: 'Ubiquiti Dream Router (UDR7)',           category: 'Gateway/Router' },
   { name: 'Ubiquiti USW-Lite-8-PoE',              category: 'PoE Switch' },
   { name: 'Adyen NYC1-SCR',                        category: 'Card Reader' },
-  { name: 'HK1 RBOX D8 Android TV Stick',         category: 'Menu Board' },
+  { name: 'HK1 RBOX D8 Android TV Stick',         category: 'Menu Board', serialEditable: true },
+  { name: 'AIO Mega Kiosk',                        category: 'Kiosk', serialEditable: true },
   { name: 'Samsung Galaxy Tab A9',                 category: 'Tablet' },
   { name: 'AIO Nugget (Tableside AI)',             category: 'Tableside AI Device' },
   { name: 'Samsung Galaxy A14',                    category: 'MPOS' },
@@ -62,11 +63,11 @@ function refreshProducts() {
   const merged  = [...HARDCODED_PRODUCTS];
   records.forEach(r => {
     if (!merged.find(h => h.name === r.name)) {
-      merged.push({ name: r.name, category: r.category || 'Other' });
+      merged.push({ name: r.name, category: r.category || 'Other', serialEditable: r.serialEditable === true });
     } else {
       // Update category/supplier on existing entry
       const idx = merged.findIndex(h => h.name === r.name);
-      if (idx > -1) merged[idx] = { ...merged[idx], category: r.category || merged[idx].category, supplier: r.supplier };
+      if (idx > -1) merged[idx] = { ...merged[idx], category: r.category || merged[idx].category, supplier: r.supplier, serialEditable: r.serialEditable ?? merged[idx].serialEditable };
     }
   });
   PRODUCTS.length = 0;
@@ -839,6 +840,10 @@ const Inventory = (() => {
     return [...new Set([...fromData, ...fromRecords, ...DB.getCustomSuppliers()])].sort();
   }
   function getProducts()  { return [...new Set(DB.getData().movements.map(m => m.product))].sort(); }
+  function isSerialEditable(productName) {
+    const p = PRODUCTS.find(x => x.name === productName);
+    return !!(p && p.serialEditable);
+  }
   function getCustomers() { return [...new Set(DB.getData().movements.filter(m => m.customer).map(m => m.customer))].sort(); }
 
   function getStats() {
@@ -1002,7 +1007,7 @@ const Inventory = (() => {
   }
 
     DB.onReady(() => refreshProducts());
-    return { getInventoryMap, getStockByProduct, getDeployedByProduct, getDeployedByCustomer, getCustomerDetail, getAllSerialRows, getDeployedSerialRows, getRmaTlDispatchedRows, getTotalLossRows, getAvailableSerials, getLowStockItems, getSerialInfo, getSerialKnownProduct, stockIn, createShipment, receiveShipment, receivePartialShipment, stockOut, stockOutByProduct, stagePendingDeployment, confirmDeployment, confirmDeployments, getPendingDeploymentSerials, getLocations, getSuppliers, getProducts, getCustomers, getStats, recallToServicing, createOrder, refreshProducts, CATEGORIES, PRODUCTS };
+    return { getInventoryMap, getStockByProduct, getDeployedByProduct, getDeployedByCustomer, getCustomerDetail, getAllSerialRows, getDeployedSerialRows, getRmaTlDispatchedRows, getTotalLossRows, getAvailableSerials, getLowStockItems, getSerialInfo, getSerialKnownProduct, stockIn, createShipment, receiveShipment, receivePartialShipment, stockOut, stockOutByProduct, stagePendingDeployment, confirmDeployment, confirmDeployments, getPendingDeploymentSerials, getLocations, getSuppliers, getProducts, isSerialEditable, getCustomers, getStats, recallToServicing, createOrder, refreshProducts, CATEGORIES, PRODUCTS };
 
   function createOrder(opts) {
     const { supplier, poNumber, expectedBy, products, taxRate, taxAmount, taxRef } = opts;

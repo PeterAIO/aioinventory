@@ -229,6 +229,7 @@ const UI = (() => {
         supplier:         record?.supplier  || '',
         defaultThreshold: record?.defaultThreshold ?? null,
         notes:            record?.notes     || '',
+        serialEditable:   record?.serialEditable ?? hardcoded?.serialEditable ?? false,
         id:               record?.id        || null,
         _stub:            !record,
       };
@@ -245,6 +246,7 @@ const UI = (() => {
       document.getElementById('prod-supplier').value         = p.supplier || '';
       document.getElementById('prod-threshold').value        = p.defaultThreshold ?? '';
       document.getElementById('prod-notes').value            = p.notes || '';
+      document.getElementById('prod-serial-editable').checked = !!p.serialEditable;
       document.getElementById('prod-edit-id').value          = p.id || '';
       document.getElementById('btn-submit-product').textContent = p.id ? 'Update product' : 'Add product';
       const cancelBtn = document.getElementById('btn-cancel-product-edit');
@@ -1698,26 +1700,30 @@ Items will remain in Stock Holding with no customer attached.`)) return;
     const totalCost   = rows.filter(r => r.cost != null).reduce((a, r) => a + r.cost, 0);
     const costedCount = rows.filter(r => r.cost != null).length;
 
-    // Update table header to show/hide admin column
+    // Editors and admins get an action column (edit serial / delete)
+    const showActions = isAdmin || canEdit;
+
+    // Update table header to show/hide action column
     const thead = document.querySelector('#v-stock-list table thead tr');
     if (thead) {
       const existingAdminTh = thead.querySelector('.th-admin');
-      if (isAdmin && !existingAdminTh) {
+      if (showActions && !existingAdminTh) {
         const th = document.createElement('th');
         th.className = 'th-admin';
         th.style.width = '70px';
         thead.appendChild(th);
-      } else if (!isAdmin && existingAdminTh) {
+      } else if (!showActions && existingAdminTh) {
         existingAdminTh.remove();
       }
     }
 
     const tbody = document.getElementById('inv-body');
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="${isAdmin ? 7 : 6}"><div class="empty">No items found</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${showActions ? 7 : 6}"><div class="empty">No items found</div></td></tr>`;
     } else {
       tbody.innerHTML = rows.map(r => {
         const isPOLocked = !!r.poNumber;
+        const canEditSerial = isAdmin || (canEdit && Inventory.isSerialEditable(r.product));
         return `<tr data-serial="${esc(r.serial)}">
           <td style="font-family:var(--mono);font-size:11px;font-weight:500">${
             r.serial.startsWith('NS-')
@@ -1746,9 +1752,9 @@ Items will remain in Stock Holding with no customer attached.`)) return;
               ${isPOLocked ? `<span class="po-lock-badge" title="Price locked to PO: ${esc(r.poNumber)}">🔒 ${esc(r.poNumber)}</span>` : ''}
             </div>
           </td>
-          ${isAdmin ? `<td style="white-space:nowrap;text-align:right;">
-            <button class="btn-icon-edit" data-serial="${esc(r.serial)}" data-product="${esc(r.product)}" title="Edit serial number">✎</button>
-            <button class="btn-icon-del"  data-serial="${esc(r.serial)}" data-product="${esc(r.product)}" title="Delete this item" style="margin-left:4px;">✕</button>
+          ${showActions ? `<td style="white-space:nowrap;text-align:right;">
+            ${canEditSerial ? `<button class="btn-icon-edit" data-serial="${esc(r.serial)}" data-product="${esc(r.product)}" title="Edit serial number">✎</button>` : ''}
+            ${isAdmin ? `<button class="btn-icon-del"  data-serial="${esc(r.serial)}" data-product="${esc(r.product)}" title="Delete this item" style="margin-left:4px;">✕</button>` : ''}
           </td>` : ''}
         </tr>`;
       }).join('');

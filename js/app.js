@@ -337,6 +337,7 @@
     ['name','category','supplier','threshold','notes'].forEach(f => {
       const el = document.getElementById('prod-' + f); if (el) el.value = '';
     });
+    const serialEditable = document.getElementById('prod-serial-editable'); if (serialEditable) serialEditable.checked = false;
     const editId = document.getElementById('prod-edit-id'); if (editId) editId.value = '';
     const btn = document.getElementById('btn-submit-product'); if (btn) btn.textContent = 'Save product';
     const cancelBtn = document.getElementById('btn-cancel-product-edit'); if (cancelBtn) cancelBtn.style.display = 'none';
@@ -354,6 +355,7 @@
       supplier:         document.getElementById('prod-supplier')?.value.trim()   || '',
       defaultThreshold: threshold !== '' && threshold != null ? parseInt(threshold) : null,
       notes:            document.getElementById('prod-notes')?.value.trim()      || '',
+      serialEditable:   document.getElementById('prod-serial-editable')?.checked || false,
     };
 
     if (editId) {
