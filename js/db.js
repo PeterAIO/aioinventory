@@ -12,7 +12,7 @@ const DB_CONFIG = {
 
 const DB = (() => {
   let _pendingWrite = false;
-  let _data  = { movements: [], thresholds: {}, shipments: [], serialCosts: {}, serialConditions: {}, customSuppliers: [], customLocations: [], orders: [], suppliers: [], productRecords: [], auditRecords: [], pendingUsers: {}, pendingDeployments: [], pausedAudits: {} };
+  let _data  = { movements: [], thresholds: {}, shipments: [], serialCosts: {}, serialConditions: {}, customSuppliers: [], customLocations: [], orders: [], suppliers: [], productRecords: [], auditRecords: [], pendingUsers: {}, pendingDeployments: [], pausedAudits: {}, hubspotCompanyMap: {} };
   let _db    = null;
   let _ready = false;
   let _onReadyCallbacks = [];
@@ -29,7 +29,7 @@ const DB = (() => {
       const snap   = await getDoc(docRef);
       if (snap.exists()) {
         const d = snap.data();
-        _data = { movements: d.movements||[], thresholds: d.thresholds||{}, shipments: d.shipments||[], serialCosts: d.serialCosts||{}, serialConditions: d.serialConditions||{}, purchaseOrders: d.purchaseOrders||{}, serialPOs: d.serialPOs||{}, customSuppliers: d.customSuppliers||[], customLocations: d.customLocations||[], orders: d.orders||[], suppliers: d.suppliers||[], productRecords: d.productRecords||[], auditRecords: d.auditRecords||[], pendingUsers: d.pendingUsers||{}, pendingDeployments: d.pendingDeployments||[], pausedAudits: d.pausedAudits||{} };
+        _data = { movements: d.movements||[], thresholds: d.thresholds||{}, shipments: d.shipments||[], serialCosts: d.serialCosts||{}, serialConditions: d.serialConditions||{}, purchaseOrders: d.purchaseOrders||{}, serialPOs: d.serialPOs||{}, customSuppliers: d.customSuppliers||[], customLocations: d.customLocations||[], orders: d.orders||[], suppliers: d.suppliers||[], productRecords: d.productRecords||[], auditRecords: d.auditRecords||[], pendingUsers: d.pendingUsers||{}, pendingDeployments: d.pendingDeployments||[], pausedAudits: d.pausedAudits||{}, hubspotCompanyMap: d.hubspotCompanyMap||{} };
       } else {
         await setDoc(docRef, _data);
       }
@@ -39,7 +39,7 @@ const DB = (() => {
         if (!snap.exists()) return;
         if (_pendingWrite) return;
         const d = snap.data();
-        _data = { movements: d.movements||[], thresholds: d.thresholds||{}, shipments: d.shipments||[], serialCosts: d.serialCosts||{}, serialConditions: d.serialConditions||{}, purchaseOrders: d.purchaseOrders||{}, serialPOs: d.serialPOs||{}, customSuppliers: d.customSuppliers||[], customLocations: d.customLocations||[], orders: d.orders||[], suppliers: d.suppliers||[], productRecords: d.productRecords||[], auditRecords: d.auditRecords||[], pendingUsers: d.pendingUsers||{}, pendingDeployments: d.pendingDeployments||[], pausedAudits: d.pausedAudits||{} };
+        _data = { movements: d.movements||[], thresholds: d.thresholds||{}, shipments: d.shipments||[], serialCosts: d.serialCosts||{}, serialConditions: d.serialConditions||{}, purchaseOrders: d.purchaseOrders||{}, serialPOs: d.serialPOs||{}, customSuppliers: d.customSuppliers||[], customLocations: d.customLocations||[], orders: d.orders||[], suppliers: d.suppliers||[], productRecords: d.productRecords||[], auditRecords: d.auditRecords||[], pendingUsers: d.pendingUsers||{}, pendingDeployments: d.pendingDeployments||[], pausedAudits: d.pausedAudits||{}, hubspotCompanyMap: d.hubspotCompanyMap||{} };
         if (typeof _currentView !== 'undefined') _refreshView();
       });
 
@@ -58,12 +58,60 @@ const DB = (() => {
   }
 
   async function _save() {
-    if (!_db) { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); return; }
+    if (!_db) {
+      // Firestore never initialised — this device is running localStorage-only
+      // and NOTHING is reaching the server. Make that impossible to miss.
+      localStorage.setItem('aio_inventory_v2', JSON.stringify(_data));
+      _saveBanner('⚠️ <b>NOT CONNECTED TO THE SERVER.</b> Your changes are saved only on this device and are NOT syncing to the team. Refresh the page; if this keeps happening, tell the admin.');
+      return;
+    }
     try {
       const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+      const payload = JSON.stringify(_data);
+      if (payload.length > 850000) _sizeBanner(payload.length);
       await setDoc(doc(_db, 'inventory', 'main'), _data);
-    } catch(e) { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); }
+      // Write reached the server — clear any prior failure state / local backup.
+      _clearSaveBanner();
+      try { localStorage.removeItem('aio_inventory_v2'); } catch(_) {}
+    } catch(e) {
+      // The write DID NOT reach Firestore. Keep a local backup AND scream about it —
+      // the old code swallowed this silently, which is how data went missing.
+      try { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); } catch(_) {}
+      console.error('DB save FAILED — change not persisted to server:', e);
+      _saveBanner('⚠️ <b>YOUR LAST CHANGE DID NOT SAVE.</b> It is stored only on this device. Do NOT close or refresh this tab — take a screenshot and tell the admin. <span style="opacity:.75">(' + _esc(e && (e.message || e.code) || 'unknown error') + ')</span>');
+    }
     finally { setTimeout(() => { _pendingWrite = false; }, 1000); }
+  }
+
+  // ── Save-status banners (self-contained; no dependency on ui.js) ─────────
+  function _esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c])); }
+  function _saveBanner(html) {
+    if (typeof document === 'undefined') return;
+    let el = document.getElementById('db-save-error');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'db-save-error';
+      el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:100000;background:#b00020;color:#fff;padding:12px 18px;font:14px/1.45 system-ui,-apple-system,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.35);';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = html;
+  }
+  function _clearSaveBanner() {
+    const el = document.getElementById('db-save-error');
+    if (el) el.remove();
+  }
+  function _sizeBanner(len) {
+    if (typeof document === 'undefined') return;
+    const kb = Math.round(len / 1024);
+    console.warn('[DB] inventory document is ~' + kb + 'KB — approaching the Firestore 1MB per-document limit.');
+    let el = document.getElementById('db-size-warn');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'db-size-warn';
+      el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#8a6d00;color:#fff;padding:8px 18px;font:13px/1.4 system-ui,-apple-system,sans-serif;text-align:center;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '⚠️ Inventory database is ~' + kb + 'KB of the 1024KB per-document limit. Approaching capacity — tell the admin to split the data before it stops saving.';
   }
 
   function onReady(fn)          { if (_ready) fn(); else _onReadyCallbacks.push(fn); }
@@ -82,6 +130,19 @@ const DB = (() => {
   function removeShipment(id)    { _data.shipments=_data.shipments.filter(s=>s.id!==id); _save(); }
   function setSerialCost(s,c)    { _data.serialCosts[s.toUpperCase()]=c; _save(); }
   function getSerialCost(s)      { return _data.serialCosts[s.toUpperCase()]??null; }
+
+  // HubSpot Company mapping — customer name (exact string) -> HubSpot Company ID
+  function setHubspotCompanyId(customer, companyId) {
+    if (!_data.hubspotCompanyMap) _data.hubspotCompanyMap = {};
+    const key = (customer || '').trim();
+    if (!key) return;
+    const id = (companyId == null ? '' : String(companyId).trim());
+    if (!id) delete _data.hubspotCompanyMap[key];
+    else _data.hubspotCompanyMap[key] = id;
+    _save();
+  }
+  function getHubspotCompanyId(customer) { return (_data.hubspotCompanyMap || {})[(customer || '').trim()] || null; }
+  function getHubspotCompanyMap()        { return _data.hubspotCompanyMap || {}; }
   function setProductCost(name,cost,map) {
     // Update in-stock serials via inventory map
     Object.values(map).forEach(v => { if(v.product===name) v.inStock.forEach(s=>{_data.serialCosts[s.toUpperCase()]=cost;}); });
@@ -164,7 +225,7 @@ const DB = (() => {
   function getProductRecords()      { return _data.productRecords||[]; }
 
   function exportJSON()          { return JSON.stringify(_data, null, 2); }
-  function importJSON(str)       { const p=JSON.parse(str); if(!Array.isArray(p.movements)) throw new Error('Invalid format'); _data={shipments:[],serialCosts:{},purchaseOrders:{},...p}; _save(); }
+  function importJSON(str)       { const p=JSON.parse(str); if(!Array.isArray(p.movements)) throw new Error('Invalid format'); _data={shipments:[],serialCosts:{},purchaseOrders:{},hubspotCompanyMap:{},...p}; _save(); }
 
   // ── Purchase Orders ────────────────────────────────────────────────────
   // poNumber -> { poNumber, supplier, date, lines: [{product, unitCost}] }
@@ -291,7 +352,7 @@ const DB = (() => {
   }
 
   init();
-  return { onReady, getData, save:_save, addMovement, setThreshold, getThreshold, addShipment, updateShipment, removeShipment, setSerialCost, getSerialCost, setProductCost, deleteSerial, renameSerial, updateSerialCondition, getSerialCondition, savePO, getPO, getAllPOs, getPONumbers, getPOUnitCost, setSerialPO, getSerialPO, addCustomSupplier, addCustomLocation, getCustomSuppliers, getCustomLocations, addOrder, updateOrder, removeOrder, getOrders, addSupplier, updateSupplier, removeSupplier, getSupplierRecords, addProductRecord, updateProductRecord, removeProductRecord, getProductRecords, addAuditRecord, getAuditRecords, setPendingUser, getPendingUser, removePendingUser, addPendingDeployment, getPendingDeployments, removePendingDeployment, updatePendingDeployment, savePausedAudit, getPausedAudit, getAllPausedAudits, clearPausedAudit, exportJSON, importJSON, uploadDocument, addDocumentToShipment, removeDocumentFromShipment, addDocumentToOrder };
+  return { onReady, getData, save:_save, addMovement, setThreshold, getThreshold, addShipment, updateShipment, removeShipment, setSerialCost, getSerialCost, setProductCost, setHubspotCompanyId, getHubspotCompanyId, getHubspotCompanyMap, deleteSerial, renameSerial, updateSerialCondition, getSerialCondition, savePO, getPO, getAllPOs, getPONumbers, getPOUnitCost, setSerialPO, getSerialPO, addCustomSupplier, addCustomLocation, getCustomSuppliers, getCustomLocations, addOrder, updateOrder, removeOrder, getOrders, addSupplier, updateSupplier, removeSupplier, getSupplierRecords, addProductRecord, updateProductRecord, removeProductRecord, getProductRecords, addAuditRecord, getAuditRecords, setPendingUser, getPendingUser, removePendingUser, addPendingDeployment, getPendingDeployments, removePendingDeployment, updatePendingDeployment, savePausedAudit, getPausedAudit, getAllPausedAudits, clearPausedAudit, exportJSON, importJSON, uploadDocument, addDocumentToShipment, removeDocumentFromShipment, addDocumentToOrder };
 })();
 
 let _currentView = 'dashboard';
