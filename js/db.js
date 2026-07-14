@@ -45,6 +45,7 @@ const DB = (() => {
 
       _ready = true;
       _onReadyCallbacks.forEach(fn => fn());
+      _walReplay(); // re-attempt any appends that never got server-confirmed last session
     } catch(err) {
       console.error('DB init error:', err);
       _loadLS();
@@ -84,10 +85,14 @@ const DB = (() => {
     _clearSaveBanner();
     try { localStorage.removeItem('aio_inventory_v2'); } catch(_) {}
   }
-  function _writeFail(e) {
+  function _writeFail(e, retriable) {
     try { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); } catch(_) {}
     console.error('DB save FAILED or timed out — change not confirmed on server:', e);
-    _saveBanner('⚠️ <b>YOUR LAST CHANGE HAS NOT SAVED.</b> It is stored only on this device. Keep this tab open and check your internet connection — if this banner does not clear in a minute, take a screenshot and tell the admin. <span style="opacity:.75">(' + _esc(e && (e.message || e.code) || 'unknown error') + ')</span>');
+    if (retriable) {
+      _saveBanner('⚠️ <b>YOUR LAST CHANGE HAS NOT SAVED YET</b> — no connection to the server. It is stored safely on this device and will keep retrying, even after a refresh, until it saves. Check your internet; if this banner does not clear in a few minutes, tell the admin. <span style="opacity:.75">(' + _esc(e && (e.message || e.code) || 'unknown error') + ')</span>');
+    } else {
+      _saveBanner('⚠️ <b>YOUR LAST CHANGE HAS NOT SAVED.</b> It is stored only on this device. Do NOT close or refresh this tab — check your internet connection, and if this banner does not clear in a minute, take a screenshot and tell the admin. <span style="opacity:.75">(' + _esc(e && (e.message || e.code) || 'unknown error') + ')</span>');
+    }
   }
   function _noDbFail() {
     try { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); } catch(_) {}
@@ -96,19 +101,63 @@ const DB = (() => {
 
   // Run a Firestore write with timeout + loud failure. If a timed-out write
   // eventually lands (connection came back while the tab stayed open), clear
-  // the banner so the user knows they are safe again.
-  async function _guardedWrite(makeWrite) {
+  // the banner so the user knows they are safe again. onOk runs exactly once
+  // when the write is confirmed on the server (used to clear WAL entries).
+  async function _guardedWrite(makeWrite, onOk, retriable) {
+    const ok = () => { _writeOk(); if (onOk) { onOk(); onOk = null; } };
     try {
       const w = makeWrite();
       try {
         await _withTimeout(w);
-        _writeOk();
+        ok();
       } catch(e) {
-        _writeFail(e);
-        if (e && e._timeout) w.then(() => _writeOk(), (e2) => _writeFail(e2));
+        _writeFail(e, retriable);
+        if (e && e._timeout) w.then(ok, (e2) => _writeFail(e2, retriable));
       }
-    } catch(e) { _writeFail(e); }
+    } catch(e) { _writeFail(e, retriable); }
     finally { setTimeout(() => { _pendingWrite = false; }, 1000); }
+  }
+
+  // ── Write-ahead log for appends ──────────────────────────────────────
+  // New movements / pending deployments are journalled to localStorage BEFORE
+  // the server write is attempted and cleared only on server ack. If a write
+  // hangs (dead connection) and the user refreshes or closes the tab, the
+  // records are REPLAYED on next load instead of dying with the tab.
+  // Replay is safe: arrayUnion cannot insert a duplicate of an identical record.
+  const WAL_KEY = 'aio_wal_v1';
+  function _walRead() {
+    try { return JSON.parse(localStorage.getItem(WAL_KEY)) || []; } catch(_) { return []; }
+  }
+  function _walWrite(q) {
+    try { localStorage.setItem(WAL_KEY, JSON.stringify(q.slice(-300))); } catch(_) {}
+  }
+  function _walAdd(field, items) {
+    const id = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const q = _walRead();
+    q.push({ id, field, items, ts: Date.now() });
+    _walWrite(q);
+    return id;
+  }
+  function _walRemove(id) { _walWrite(_walRead().filter(e => e.id !== id)); }
+  function _walReplay() {
+    const q = _walRead();
+    if (!q.length) return;
+    console.warn('[DB] replaying', q.length, 'unsaved change(s) from a previous session');
+    q.forEach(entry => {
+      if (!entry || !entry.field || !Array.isArray(entry.items) || !entry.items.length) { _walRemove(entry && entry.id); return; }
+      // Drop stale junk (>14 days) rather than resurrecting ancient state
+      if (Date.now() - (entry.ts || 0) > 14 * 24 * 3600 * 1000) { _walRemove(entry.id); return; }
+      const arr = _data[entry.field];
+      if (!Array.isArray(arr)) { _walRemove(entry.id); return; }
+      // Add locally only if not already present (by record id)
+      const have = new Set(arr.map(x => x && x.id));
+      const missing = entry.items.filter(x => x && !have.has(x.id));
+      arr.push(...missing);
+      // Re-attempt the server append (arrayUnion dedupes if it already landed);
+      // WAL entry is cleared only when the server confirms.
+      _appendArray(entry.field, entry.items, entry.id);
+    });
+    if (typeof _currentView !== 'undefined') { try { _refreshView(); } catch(_) {} }
   }
 
   // Field-scoped save: updateDoc only touches the named fields, so it can
@@ -128,12 +177,18 @@ const DB = (() => {
   // Append-only write for the high-value arrays: arrayUnion adds the new
   // records without rewriting the array, so concurrent saves cannot clobber
   // each other and a stale late-landing write can only ADD its own records.
-  async function _appendArray(field, items) {
+  // Journalled in the WAL until the server confirms (walId reused on replay).
+  async function _appendArray(field, items, walId) {
+    if (walId === undefined) walId = _walAdd(field, items);
     if (!_db) { _noDbFail(); return; }
     try {
       const { doc, updateDoc, arrayUnion } = await import(FS_URL);
-      await _guardedWrite(() => updateDoc(doc(_db, 'inventory', 'main'), { [field]: arrayUnion(...items) }));
-    } catch(e) { _writeFail(e); }
+      await _guardedWrite(
+        () => updateDoc(doc(_db, 'inventory', 'main'), { [field]: arrayUnion(...items) }),
+        () => _walRemove(walId),
+        true
+      );
+    } catch(e) { _writeFail(e, true); }
   }
 
   // Full-document overwrite — ONLY for explicit whole-dataset restore.
