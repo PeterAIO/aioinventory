@@ -57,31 +57,95 @@ const DB = (() => {
     try { const r = localStorage.getItem('aio_inventory_v2'); if (r) { const d=JSON.parse(r); _data={movements:[],thresholds:{},shipments:[],serialCosts:{},...d}; } } catch(e) {}
   }
 
-  async function _save() {
-    if (!_db) {
-      // Firestore never initialised — this device is running localStorage-only
-      // and NOTHING is reaching the server. Make that impossible to miss.
-      localStorage.setItem('aio_inventory_v2', JSON.stringify(_data));
-      _saveBanner('⚠️ <b>NOT CONNECTED TO THE SERVER.</b> Your changes are saved only on this device and are NOT syncing to the team. Refresh the page; if this keeps happening, tell the admin.');
-      return;
-    }
+  const FS_URL = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+  // Fields written by the generic _save(). `movements` and `pendingDeployments`
+  // are deliberately EXCLUDED: they have their own append-safe write paths
+  // (arrayUnion) so that concurrent users can never overwrite each other's
+  // additions. Ops that legitimately rewrite those arrays (delete/rename serial,
+  // confirm/unstage pending) pass them explicitly via _persist().
+  const SAVE_FIELDS = ['thresholds','shipments','serialCosts','serialConditions','purchaseOrders','serialPOs','customSuppliers','customLocations','orders','suppliers','productRecords','auditRecords','pendingUsers','pausedAudits','hubspotCompanyMap'];
+
+  // A write that HANGS (no network / blocked webchannel) never rejects — the
+  // Firestore SDK just queues it in memory. Without a timeout that is invisible:
+  // no error, no banner, and the queued write dies with the tab. Race it.
+  function _withTimeout(p, ms = 10000) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        const err = new Error('save timed out — no connection to the server');
+        err._timeout = true;
+        reject(err);
+      }, ms);
+      p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+    });
+  }
+
+  function _writeOk() {
+    _clearSaveBanner();
+    try { localStorage.removeItem('aio_inventory_v2'); } catch(_) {}
+  }
+  function _writeFail(e) {
+    try { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); } catch(_) {}
+    console.error('DB save FAILED or timed out — change not confirmed on server:', e);
+    _saveBanner('⚠️ <b>YOUR LAST CHANGE HAS NOT SAVED.</b> It is stored only on this device. Keep this tab open and check your internet connection — if this banner does not clear in a minute, take a screenshot and tell the admin. <span style="opacity:.75">(' + _esc(e && (e.message || e.code) || 'unknown error') + ')</span>');
+  }
+  function _noDbFail() {
+    try { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); } catch(_) {}
+    _saveBanner('⚠️ <b>NOT CONNECTED TO THE SERVER.</b> Your changes are saved only on this device and are NOT syncing to the team. Refresh the page; if this keeps happening, tell the admin.');
+  }
+
+  // Run a Firestore write with timeout + loud failure. If a timed-out write
+  // eventually lands (connection came back while the tab stayed open), clear
+  // the banner so the user knows they are safe again.
+  async function _guardedWrite(makeWrite) {
     try {
-      const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const payload = JSON.stringify(_data);
-      if (payload.length > 850000) _sizeBanner(payload.length);
-      await setDoc(doc(_db, 'inventory', 'main'), _data);
-      // Write reached the server — clear any prior failure state / local backup.
-      _clearSaveBanner();
-      try { localStorage.removeItem('aio_inventory_v2'); } catch(_) {}
-    } catch(e) {
-      // The write DID NOT reach Firestore. Keep a local backup AND scream about it —
-      // the old code swallowed this silently, which is how data went missing.
-      try { localStorage.setItem('aio_inventory_v2', JSON.stringify(_data)); } catch(_) {}
-      console.error('DB save FAILED — change not persisted to server:', e);
-      _saveBanner('⚠️ <b>YOUR LAST CHANGE DID NOT SAVE.</b> It is stored only on this device. Do NOT close or refresh this tab — take a screenshot and tell the admin. <span style="opacity:.75">(' + _esc(e && (e.message || e.code) || 'unknown error') + ')</span>');
-    }
+      const w = makeWrite();
+      try {
+        await _withTimeout(w);
+        _writeOk();
+      } catch(e) {
+        _writeFail(e);
+        if (e && e._timeout) w.then(() => _writeOk(), (e2) => _writeFail(e2));
+      }
+    } catch(e) { _writeFail(e); }
     finally { setTimeout(() => { _pendingWrite = false; }, 1000); }
   }
+
+  // Field-scoped save: updateDoc only touches the named fields, so it can
+  // never wipe out another user's concurrent movement/pending appends.
+  async function _persist(fieldNames) {
+    if (!_db) { _noDbFail(); return; }
+    try {
+      const payload = JSON.stringify(_data);
+      if (payload.length > 850000) _sizeBanner(payload.length);
+      const { doc, updateDoc } = await import(FS_URL);
+      const upd = {};
+      for (const k of fieldNames) if (_data[k] !== undefined) upd[k] = _data[k];
+      await _guardedWrite(() => updateDoc(doc(_db, 'inventory', 'main'), upd));
+    } catch(e) { _writeFail(e); }
+  }
+
+  // Append-only write for the high-value arrays: arrayUnion adds the new
+  // records without rewriting the array, so concurrent saves cannot clobber
+  // each other and a stale late-landing write can only ADD its own records.
+  async function _appendArray(field, items) {
+    if (!_db) { _noDbFail(); return; }
+    try {
+      const { doc, updateDoc, arrayUnion } = await import(FS_URL);
+      await _guardedWrite(() => updateDoc(doc(_db, 'inventory', 'main'), { [field]: arrayUnion(...items) }));
+    } catch(e) { _writeFail(e); }
+  }
+
+  // Full-document overwrite — ONLY for explicit whole-dataset restore.
+  async function _persistFull() {
+    if (!_db) { _noDbFail(); return; }
+    try {
+      const { doc, setDoc } = await import(FS_URL);
+      await _guardedWrite(() => setDoc(doc(_db, 'inventory', 'main'), _data));
+    } catch(e) { _writeFail(e); }
+  }
+
+  function _save() { return _persist(SAVE_FIELDS); }
 
   // ── Save-status banners (self-contained; no dependency on ui.js) ─────────
   function _esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c])); }
@@ -116,7 +180,8 @@ const DB = (() => {
 
   function onReady(fn)          { if (_ready) fn(); else _onReadyCallbacks.push(fn); }
   function getData()             { return _data; }
-  function addMovement(mv)       { _data.movements.push(mv); _save(); }
+  function addMovement(mv)       { _data.movements.push(mv); _appendArray('movements', [mv]); }
+  function addMovements(mvs)     { if (!mvs || !mvs.length) return; _data.movements.push(...mvs); _appendArray('movements', mvs); }
   function setThreshold(k, v)    { _data.thresholds[k] = v; _save(); }
   function getThreshold(k) {
     if (_data.thresholds[k] !== undefined) return _data.thresholds[k];
@@ -163,7 +228,7 @@ const DB = (() => {
       serials: mv.serials.filter(x => x.toUpperCase() !== s)
     })).filter(mv => mv.serials.length > 0);
     delete _data.serialCosts[s];
-    _save();
+    _persist([...SAVE_FIELDS, 'movements']);
   }
 
   // Rename a serial across all movements and cost records
@@ -178,7 +243,7 @@ const DB = (() => {
       _data.serialCosts[n] = _data.serialCosts[o];
       delete _data.serialCosts[o];
     }
-    _save();
+    _persist([...SAVE_FIELDS, 'movements']);
   }
   // Update condition flag on the IN movement for a serial (also records tester)
   // NOTE: the 'used' field is NEVER modified here — it is permanent from receipt
@@ -202,7 +267,7 @@ const DB = (() => {
       }
       return mv;
     });
-    _save();
+    _persist([...SAVE_FIELDS, 'movements']);
   }
   function getSerialCondition(serial) {
     const s = serial.toUpperCase();
@@ -225,7 +290,7 @@ const DB = (() => {
   function getProductRecords()      { return _data.productRecords||[]; }
 
   function exportJSON()          { return JSON.stringify(_data, null, 2); }
-  function importJSON(str)       { const p=JSON.parse(str); if(!Array.isArray(p.movements)) throw new Error('Invalid format'); _data={shipments:[],serialCosts:{},purchaseOrders:{},hubspotCompanyMap:{},...p}; _save(); }
+  function importJSON(str)       { const p=JSON.parse(str); if(!Array.isArray(p.movements)) throw new Error('Invalid format'); _data={shipments:[],serialCosts:{},purchaseOrders:{},hubspotCompanyMap:{},...p}; _persistFull(); }
 
   // ── Purchase Orders ────────────────────────────────────────────────────
   // poNumber -> { poNumber, supplier, date, lines: [{product, unitCost}] }
@@ -294,12 +359,12 @@ const DB = (() => {
   }
 
   // ── Pending Deployments ──────────────────────────────────────────────
-  function addPendingDeployment(pd)   { if(!_data.pendingDeployments) _data.pendingDeployments=[]; _data.pendingDeployments.push(pd); _save(); }
+  function addPendingDeployment(pd)   { if(!_data.pendingDeployments) _data.pendingDeployments=[]; _data.pendingDeployments.push(pd); _appendArray('pendingDeployments', [pd]); }
   function getPendingDeployments()    { return _data.pendingDeployments || []; }
-  function removePendingDeployment(id){ _data.pendingDeployments = (_data.pendingDeployments||[]).filter(p => p.id !== id); _save(); }
+  function removePendingDeployment(id){ _data.pendingDeployments = (_data.pendingDeployments||[]).filter(p => p.id !== id); _persist([...SAVE_FIELDS, 'pendingDeployments']); }
   function updatePendingDeployment(id, changes) {
     const idx = (_data.pendingDeployments||[]).findIndex(p => p.id === id);
-    if (idx > -1) { _data.pendingDeployments[idx] = { ..._data.pendingDeployments[idx], ...changes }; _save(); }
+    if (idx > -1) { _data.pendingDeployments[idx] = { ..._data.pendingDeployments[idx], ...changes }; _persist([...SAVE_FIELDS, 'pendingDeployments']); }
   }
 
 
@@ -352,7 +417,7 @@ const DB = (() => {
   }
 
   init();
-  return { onReady, getData, save:_save, addMovement, setThreshold, getThreshold, addShipment, updateShipment, removeShipment, setSerialCost, getSerialCost, setProductCost, setHubspotCompanyId, getHubspotCompanyId, getHubspotCompanyMap, deleteSerial, renameSerial, updateSerialCondition, getSerialCondition, savePO, getPO, getAllPOs, getPONumbers, getPOUnitCost, setSerialPO, getSerialPO, addCustomSupplier, addCustomLocation, getCustomSuppliers, getCustomLocations, addOrder, updateOrder, removeOrder, getOrders, addSupplier, updateSupplier, removeSupplier, getSupplierRecords, addProductRecord, updateProductRecord, removeProductRecord, getProductRecords, addAuditRecord, getAuditRecords, setPendingUser, getPendingUser, removePendingUser, addPendingDeployment, getPendingDeployments, removePendingDeployment, updatePendingDeployment, savePausedAudit, getPausedAudit, getAllPausedAudits, clearPausedAudit, exportJSON, importJSON, uploadDocument, addDocumentToShipment, removeDocumentFromShipment, addDocumentToOrder };
+  return { onReady, getData, save:_save, addMovement, addMovements, setThreshold, getThreshold, addShipment, updateShipment, removeShipment, setSerialCost, getSerialCost, setProductCost, setHubspotCompanyId, getHubspotCompanyId, getHubspotCompanyMap, deleteSerial, renameSerial, updateSerialCondition, getSerialCondition, savePO, getPO, getAllPOs, getPONumbers, getPOUnitCost, setSerialPO, getSerialPO, addCustomSupplier, addCustomLocation, getCustomSuppliers, getCustomLocations, addOrder, updateOrder, removeOrder, getOrders, addSupplier, updateSupplier, removeSupplier, getSupplierRecords, addProductRecord, updateProductRecord, removeProductRecord, getProductRecords, addAuditRecord, getAuditRecords, setPendingUser, getPendingUser, removePendingUser, addPendingDeployment, getPendingDeployments, removePendingDeployment, updatePendingDeployment, savePausedAudit, getPausedAudit, getAllPausedAudits, clearPausedAudit, exportJSON, importJSON, uploadDocument, addDocumentToShipment, removeDocumentFromShipment, addDocumentToOrder };
 })();
 
 let _currentView = 'dashboard';

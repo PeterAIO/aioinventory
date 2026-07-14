@@ -644,7 +644,8 @@ const Audit = (() => {
     if (ri < 0) return;
     if (!recs[ri].writtenOffSerials) recs[ri].writtenOffSerials = [];
 
-    // Step 1: push movements directly into _data without triggering a save
+    // Step 1: build the write-off movements (persisted append-safely below)
+    const newMovements = [];
     serials.forEach(serial => {
       const key = serial.toUpperCase();
       const info = Inventory.getAllSerialRows().find(r => r.serial.toUpperCase() === key) || {};
@@ -654,7 +655,7 @@ const Audit = (() => {
       const inCount  = stillInStock.filter(m => m.type === 'IN').length;
       if (outCount >= inCount && outCount > 0) return; // already fully written off
 
-      data.movements.push({
+      newMovements.push({
         id: Date.now() + Math.random(), type: 'OUT',
         product: info.product || recs[ri].scope.split(' @ ')[0],
         category: info.category || '',
@@ -679,8 +680,9 @@ const Audit = (() => {
     recs[ri].matched = recs[ri].expected - recs[ri].missing;
     recs[ri].lost    = recs[ri].writtenOffSerials.length;
 
-    // Step 3: ONE single save with all changes together
+    // Step 3: persist — movements via the append-safe path, audit record via save
     Object.assign(record, recs[ri]);
+    DB.addMovements(newMovements);
     DB.save();
 
     // Step 4: refresh report
