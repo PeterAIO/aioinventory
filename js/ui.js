@@ -2045,10 +2045,18 @@ Items will remain in Stock Holding with no customer attached.`)) return;
       if (!newSerial) { errEl.textContent = 'Serial number is required.'; errEl.style.display = 'block'; return; }
       if (newSerial === oldSerial) { close(); return; }
 
-      // Check new serial doesn't already exist
-      const allSerials = Inventory.getAllSerialRows().map(r => r.serial.toUpperCase());
-      if (allSerials.includes(newSerial)) {
-        errEl.textContent = `Serial "${newSerial}" already exists in stock.`;
+      // Check the new serial isn't already in use ANYWHERE — not just in stock.
+      // A serial that is deployed / RMA / total-loss lives in an OUT movement and
+      // is netted out of stock, so an in-stock-only check silently misses it and
+      // renaming onto it makes the unit vanish (IN nets against the existing OUT).
+      const usage = Inventory.getSerialInfo(newSerial);
+      if (usage.status !== 'unknown') {
+        const where =
+          usage.status === 'dispatched'  ? (usage.deployedTo ? `already deployed to ${usage.deployedTo}` : 'already deployed to a customer')
+        : usage.status === 'in-transit'  ? 'already in transit'
+        : usage.status === 'in-stock'    ? `already in stock${usage.currentLocation ? ' at ' + usage.currentLocation : ''}`
+        : 'already in use';
+        errEl.textContent = `Serial "${newSerial}" is ${where}. Every serial must be unique — pick a different one.`;
         errEl.style.display = 'block';
         return;
       }
