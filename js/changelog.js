@@ -4,6 +4,15 @@
  */
 var CHANGELOG = [
   {
+    version: 'v102',
+    date: '2026-07-15',
+    title: 'Serial Rename Safety — No More Vanishing Units',
+    changes: [
+      { type: 'fixed', text: 'Editing/adding a serial number now blocks any serial that is already in use anywhere — deployed, in transit, RMA, total-loss or in stock — not just in-stock ones. Renaming a unit onto a serial already deployed to a customer used to silently make the unit disappear from stock; it now shows a clear error naming where that serial is already used' },
+      { type: 'fixed', text: 'Repaired the HK1 RBOX D8 stock at San Jose: several units had been collapsed onto serial ADRB0AAHE00047 (deployed to Con Azucar - Gilroy), hiding them from the count. Recovered units are now distinct rows — 13 show as "+ Add serial" and need their real serial read off the device' },
+    ],
+  },
+  {
     version: 'v101',
     date: '2026-04-15',
     title: 'Order Status Fix — Partial Shipments',
